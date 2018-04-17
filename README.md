@@ -12,8 +12,9 @@ Following the instruction from [Writing an OS in Rust](https://os.phil-opp.com/s
 ```
 git clone https://github.com/huyvn/blog-os.git
 ```
-1. Build the binary
+2. Build the binary
 ```
+cd blog-os/
 cargo rustc -- -Z pre-link-arg=-nostartfiles
 ```
 
