@@ -22,16 +22,16 @@ pub enum Color {
     White = 15,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct ColorCode(u8);
 
-impl ColorCode{
+impl ColorCode {
     const fn new(foreground: Color, background: Color) -> ColorCode {
         ColorCode((background as u8) << 4 | (foreground as u8))
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 struct ScreenChar {
     ascii_character: u8,
@@ -49,8 +49,8 @@ lazy_static! {
     });
 }
 
-use volatile::Volatile;
 use core::fmt;
+use volatile::Volatile;
 
 impl fmt::Write for Writer {
     fn write_str(&mut self, s: &str) -> fmt::Result {
@@ -70,7 +70,7 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub fn write_byte(&mut self, byte: u8){
+    pub fn write_byte(&mut self, byte: u8) {
         match byte {
             b'\n' => self.new_line(),
             byte => {
@@ -106,7 +106,7 @@ impl Writer {
         for row in 1..BUFFER_HEIGHT {
             for col in 0..BUFFER_WIDTH {
                 let character = self.buffer.chars[row][col].read();
-                self.buffer.chars[row-1][col].write(character);
+                self.buffer.chars[row - 1][col].write(character);
             }
         }
         self.clear_row(BUFFER_HEIGHT - 1);
@@ -137,4 +137,88 @@ macro_rules! println {
 pub fn print(args: fmt::Arguments) {
     use core::fmt::Write;
     WRITER.lock().write_fmt(args).unwrap();
+}
+
+// setup testing suite
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn write_byte() {
+        let mut writer = construct_writer();
+        writer.write_byte(b'X');
+        writer.write_byte(b'Y');
+
+        for (i, row) in writer.buffer.chars.iter().enumerate() {
+            for (j, screen_char) in row.iter().enumerate() {
+                let screen_char = screen_char.read();
+                if i == BUFFER_HEIGHT - 1 && j == 0 {
+                    assert_eq!(screen_char.ascii_character, b'X');
+                    assert_eq!(screen_char.color_code, writer.color_code);
+                } else if i == BUFFER_HEIGHT - 1 && j == 1 {
+                    assert_eq!(screen_char.ascii_character, b'Y');
+                    assert_eq!(screen_char.color_code, writer.color_code);
+                } else {
+                    assert_eq!(screen_char, empty_char());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn write_formatted() {
+        use core::fmt::Write;
+
+        let mut writer = construct_writer();
+        writeln!(&mut writer, "a").unwrap();
+        writeln!(&mut writer, "b{}", "c").unwrap();
+
+        for (i, row) in writer.buffer.chars.iter().enumerate() {
+            for (j, screen_char) in row.iter().enumerate() {
+                let screen_char = screen_char.read();
+                if i == BUFFER_HEIGHT - 3 && j == 0 {
+                    assert_eq!(screen_char.ascii_character, b'a');
+                    assert_eq!(screen_char.color_code, writer.color_code);
+                } else if i == BUFFER_HEIGHT - 2 && j == 0 {
+                    assert_eq!(screen_char.ascii_character, b'b');
+                    assert_eq!(screen_char.color_code, writer.color_code);
+                } else if i == BUFFER_HEIGHT - 2 && j == 1 {
+                    assert_eq!(screen_char.ascii_character, b'c');
+                    assert_eq!(screen_char.color_code, writer.color_code);
+                } else if i >= BUFFER_HEIGHT - 2 {
+                    assert_eq!(screen_char.ascii_character, b' ');
+                    assert_eq!(screen_char.color_code, writer.color_code);
+                } else {
+                    assert_eq!(screen_char, empty_char());
+                }
+            }
+        }
+    }
+
+    fn construct_writer() -> Writer {
+        use std::boxed::Box;
+
+        let buffer = construct_buffer();
+        Writer {
+            column_position: 0,
+            color_code: ColorCode::new(Color::Blue, Color::Magenta),
+            buffer: Box::leak(Box::new(buffer)),
+        }
+    }
+
+    fn construct_buffer() -> Buffer {
+        use array_init::array_init;
+
+        Buffer {
+            chars: array_init(|_| array_init(|_| Volatile::new(empty_char()))),
+        }
+    }
+
+    fn empty_char() -> ScreenChar {
+        ScreenChar {
+            ascii_character: b' ',
+            color_code: ColorCode::new(Color::Green, Color::Brown),
+        }
+    }
 }
